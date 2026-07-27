@@ -1,0 +1,69 @@
+.eyebrow {
+  margin: 0 0 var(--space-sm);
+  color: var(--color-text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  background: var(--color-panel-bg);
+}
+
+.metric-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  color: var(--color-text-muted);
+  font-size: var(--text-body-size);
+}
+
+.metric-row strong {
+  color: #eef4f8;
+  font-size: var(--text-body-size);
+}
+
+.layer-button,
+.tool-button {
+  border: var(--control-frame-width) solid rgba(164, 179, 194, 0.2);
+  border-radius: var(--control-radius);
+  background: var(--control-bg);
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast),
+    border-color var(--motion-fast),
+    color var(--motion-fast);
+}
+
+.layer-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  color: #d6e0e8;
+  text-align: left;
+}
+
+.layer-button small {
+  color: var(--color-text-soft);
+}
+
+.tool-button {
+  min-width: 72px;
+  min-height: var(--control-min-height);
+  padding: var(--control-padding-y) var(--control-padding-x);
+}
+
+.layer-button.active,
+.tool-button.active {
+  border: var(--border-active);
+  background: var(--control-bg-active);
+  color: var(--color-accent-contrast);
+}

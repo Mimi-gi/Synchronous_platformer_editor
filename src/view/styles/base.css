@@ -1,0 +1,45 @@
+:root {
+  color: var(--color-text-body);
+  background: var(--color-app-bg);
+  font-family: var(--font-ui);
+  font-synthesis: none;
+  letter-spacing: var(--letter-spacing-ui);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+button {
+  color: inherit;
+  font: inherit;
+}
+
+h1,
+h2 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-family: var(--font-heading);
+  font-weight: 760;
+  letter-spacing: var(--letter-spacing-ui);
+}
+
+h1 {
+  font-size: var(--text-title-size);
+  line-height: 1.18;
+}
+
+h2 {
+  font-size: var(--text-panel-title-size);
+}

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ChangeEvent } from "react";
 import { createInitialProject } from "../editor/createInitialProject";
 import type { EditorProject, GridCell, ToolMode, Viewport } from "../editor/types";
 import type { EditorRenderer, RendererKind, RendererSize } from "../rendering/Renderer";
 import { createRenderer } from "../rendering/createRenderer";
+import { isEditorProject } from "../project/validateProject";
 
 const TOOL_LABELS: Record<ToolMode, string> = {
   select: "Select",
@@ -11,21 +13,23 @@ const TOOL_LABELS: Record<ToolMode, string> = {
   pan: "Pan",
 };
 
-const PAINT_COLOR = "#7ddf8a";
-
 export function EditorCanvas() {
   const [project, setProject] = useState<EditorProject>(() => createInitialProject());
+  const [activeLayerId, setActiveLayerId] = useState("terrain");
+  const [selectedTileId, setSelectedTileId] = useState(1);
   const [selectedTool, setSelectedTool] = useState<ToolMode>("paint");
   const [viewport, setViewport] = useState<Viewport>({ centerX: 480, centerY: 320, zoom: 1 });
   const [hoverCell, setHoverCell] = useState<GridCell | null>(null);
   const [rendererKind, setRendererKind] = useState<RendererKind | "initializing">("initializing");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<EditorRenderer | null>(null);
   const sizeRef = useRef<RendererSize>({ width: 1, height: 1, dpr: 1 });
   const dragRef = useRef<{ x: number; y: number; viewport: Viewport } | null>(null);
 
   const activeLevel = project.levels[0];
-  const activeLayer = activeLevel.layers[0];
+  const activeLayer = activeLevel.layers.find((layer) => layer.id === activeLayerId) ?? activeLevel.layers[0];
+  const selectedTile = project.tiles.find((tile) => tile.id === selectedTileId) ?? project.tiles[0];
   const tileCount = useMemo(
     () => Object.keys(activeLayer.cells).length,
     [activeLayer.cells],
@@ -142,35 +146,81 @@ export function EditorCanvas() {
 
       setProject((current) => {
         const level = current.levels[0];
-        const layer = level.layers[0];
+        const layerIndex = level.layers.findIndex((layer) => layer.id === activeLayer.id);
+        const layer = level.layers[layerIndex] ?? level.layers[0];
         const key = `${cell.x},${cell.y}`;
         const nextCells = { ...layer.cells };
 
         if (selectedTool === "paint") {
-          nextCells[key] = { tileId: 1, color: PAINT_COLOR };
+          nextCells[key] = { tileId: selectedTile.id, color: selectedTile.color };
         } else {
           delete nextCells[key];
         }
+
+        const nextLayers = [...level.layers];
+        nextLayers[layerIndex] = {
+          ...layer,
+          cells: nextCells,
+        };
 
         return {
           ...current,
           levels: [
             {
               ...level,
-              layers: [
-                {
-                  ...layer,
-                  cells: nextCells,
-                },
-                ...level.layers.slice(1),
-              ],
+              layers: nextLayers,
             },
           ],
         };
       });
     },
-    [selectedTool],
+    [activeLayer.id, selectedTile.color, selectedTile.id, selectedTool],
   );
+
+  const downloadProject = useCallback(() => {
+    const blob = new Blob([JSON.stringify(project, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${project.name.toLowerCase().replaceAll(" ", "-")}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, [project]);
+
+  const importProject = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      try {
+        const nextProject = JSON.parse(String(reader.result)) as unknown;
+        if (!isEditorProject(nextProject)) {
+          throw new Error("The selected JSON does not match the editor project format.");
+        }
+
+        const nextLevel = nextProject.levels[0];
+        const nextLayer = nextLevel.layers[0];
+        const nextTile = nextProject.tiles[0];
+
+        setProject(nextProject);
+        setActiveLayerId(nextLayer.id);
+        setSelectedTileId(nextTile.id);
+        setViewport({
+          centerX: (nextLevel.width * nextProject.tileSize) / 2,
+          centerY: (nextLevel.height * nextProject.tileSize) / 2,
+          zoom: 1,
+        });
+      } catch (error) {
+        console.error("Could not import project JSON.", error);
+      }
+    });
+    reader.readAsText(file);
+  }, []);
 
   const handlePointerDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -245,12 +295,34 @@ export function EditorCanvas() {
             <button
               className={layer.id === activeLayer.id ? "layer-button active" : "layer-button"}
               key={layer.id}
+              onClick={() => setActiveLayerId(layer.id)}
               type="button"
             >
               <span>{layer.name}</span>
               <small>{Object.keys(layer.cells).length}</small>
             </button>
           ))}
+        </section>
+
+        <section className="panel">
+          <h2>Tiles</h2>
+          <div className="palette-grid" aria-label="Tile palette">
+            {project.tiles.map((tile) => (
+              <button
+                className={tile.id === selectedTile.id ? "tile-swatch active" : "tile-swatch"}
+                key={tile.id}
+                onClick={() => {
+                  setSelectedTileId(tile.id);
+                  setSelectedTool("paint");
+                }}
+                style={{ "--swatch-color": tile.color } as CSSProperties}
+                title={tile.name}
+                type="button"
+              >
+                <span />
+              </button>
+            ))}
+          </div>
         </section>
       </aside>
 
@@ -267,6 +339,20 @@ export function EditorCanvas() {
               {TOOL_LABELS[tool]}
             </button>
           ))}
+          <span className="toolbar-spacer" />
+          <button className="tool-button" onClick={downloadProject} type="button">
+            Export
+          </button>
+          <button className="tool-button" onClick={() => fileInputRef.current?.click()} type="button">
+            Import
+          </button>
+          <input
+            ref={fileInputRef}
+            accept="application/json"
+            className="file-input"
+            onChange={importProject}
+            type="file"
+          />
         </div>
 
         <div className="canvas-frame">

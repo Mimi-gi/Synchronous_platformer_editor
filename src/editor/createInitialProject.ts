@@ -20,6 +20,14 @@ export function createInitialProject(): EditorProject {
     id: "project-local-prototype",
     name: "Synchronous Platformer Editor",
     tileSize: 32,
+    tiles: [
+      { id: 1, name: "Grass", color: "#6fbf73" },
+      { id: 2, name: "Soil", color: "#3f7f5f" },
+      { id: 3, name: "Wood", color: "#d6a04d" },
+      { id: 4, name: "Ice", color: "#6c9df0" },
+      { id: 5, name: "Hazard", color: "#f06c7a" },
+      { id: 6, name: "Pickup", color: "#f2d05e" },
+    ],
     levels: [
       {
         id: "level-1",

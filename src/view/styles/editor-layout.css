@@ -35,6 +35,11 @@
   background: var(--color-toolbar-bg);
 }
 
+.toolbar-spacer {
+  flex: 1;
+  min-width: var(--space-md);
+}
+
 .canvas-frame {
   position: relative;
   min-width: 0;
@@ -89,5 +94,9 @@ canvas {
 
   .toolbar {
     overflow-x: auto;
+  }
+
+  .toolbar-spacer {
+    display: none;
   }
 }

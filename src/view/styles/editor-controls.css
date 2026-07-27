@@ -28,7 +28,8 @@
 }
 
 .layer-button,
-.tool-button {
+.tool-button,
+.tile-swatch {
   border: var(--control-frame-width) solid rgba(164, 179, 194, 0.2);
   border-radius: var(--control-radius);
   background: var(--control-bg);
@@ -66,4 +67,36 @@
   border: var(--border-active);
   background: var(--control-bg-active);
   color: var(--color-accent-contrast);
+}
+
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: var(--space-sm);
+}
+
+.tile-swatch {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 4px;
+}
+
+.tile-swatch span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: calc(var(--control-radius) * 0.5);
+  background: var(--swatch-color);
+}
+
+.tile-swatch.active {
+  border: var(--border-active);
+  background: var(--control-bg-active);
+}
+
+.file-input {
+  display: none;
 }

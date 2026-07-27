@@ -5,6 +5,12 @@ export type TileCell = {
   color: string;
 };
 
+export type TileDefinition = {
+  id: number;
+  name: string;
+  color: string;
+};
+
 export type TileLayer = {
   id: string;
   name: string;
@@ -26,6 +32,7 @@ export type EditorProject = {
   id: string;
   name: string;
   tileSize: number;
+  tiles: TileDefinition[];
   levels: EditorLevel[];
 };
 

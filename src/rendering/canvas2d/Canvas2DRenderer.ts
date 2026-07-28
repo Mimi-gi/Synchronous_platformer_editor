@@ -1,11 +1,15 @@
+import type { Sprite, TextureAsset, TileDefinition } from "../../editor/types";
 import type { EditorRenderer, RendererSize, RenderFrame } from "../Renderer";
-import { hexToRgb } from "../color";
+import { layerFocusStyle, tileAppearance } from "../color";
 
 export class Canvas2DRenderer implements EditorRenderer {
   readonly kind = "canvas2d" as const;
 
   private context: CanvasRenderingContext2D | null = null;
   private size: RendererSize = { width: 1, height: 1, dpr: 1 };
+  // Decoded texture images keyed by texture id (with the src they were loaded
+  // from, so a replaced texture reloads).
+  private images = new Map<string, { src: string; image: HTMLImageElement }>();
 
   async init(canvas: HTMLCanvasElement): Promise<void> {
     const context = canvas.getContext("2d");
@@ -14,6 +18,18 @@ export class Canvas2DRenderer implements EditorRenderer {
     }
 
     this.context = context;
+  }
+
+  private getImage(texture: TextureAsset): HTMLImageElement | null {
+    const cached = this.images.get(texture.id);
+    if (cached && cached.src === texture.src) {
+      return cached.image.complete && cached.image.naturalWidth > 0 ? cached.image : null;
+    }
+
+    const image = new Image();
+    image.src = texture.src;
+    this.images.set(texture.id, { src: texture.src, image });
+    return image.complete && image.naturalWidth > 0 ? image : null;
   }
 
   resize(size: RendererSize): void {
@@ -80,20 +96,58 @@ export class Canvas2DRenderer implements EditorRenderer {
 
     const tileSize = frame.project.tileSize;
     const screenTile = tileSize * frame.viewport.zoom;
+    const tilesById = new Map<number, TileDefinition>(frame.project.tiles.map((tile) => [tile.id, tile]));
+    const spritesById = new Map<string, Sprite>(frame.project.sprites.map((sprite) => [sprite.id, sprite]));
+    const texturesById = new Map<string, TextureAsset>(
+      frame.project.textures.map((texture) => [texture.id, texture]),
+    );
+
+    context.imageSmoothingEnabled = false;
 
     for (const layer of level.layers) {
       if (!layer.visible) continue;
 
+      const isActiveLayer = layer.id === frame.activeLayerId;
+      const style = layerFocusStyle({
+        layerColor: layer.color,
+        isActiveLayer,
+        layerFocus: frame.layerFocus,
+      });
+
       for (const [key, cell] of Object.entries(layer.cells)) {
         const [x, y] = key.split(",").map(Number);
-        const rgb = hexToRgb(cell.color);
-        context.fillStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${layer.opacity})`;
-        context.fillRect(
-          this.worldToScreenX(x * tileSize, frame),
-          this.worldToScreenY(y * tileSize, frame),
-          screenTile,
-          screenTile,
-        );
+        const dx = this.worldToScreenX(x * tileSize, frame);
+        const dy = this.worldToScreenY(y * tileSize, frame);
+
+        const tile = tilesById.get(cell.tileId);
+        const sprite = tile?.spriteId ? spritesById.get(tile.spriteId) : undefined;
+        const texture = sprite ? texturesById.get(sprite.textureId) : undefined;
+        const image = texture ? this.getImage(texture) : null;
+
+        if (sprite && image) {
+          context.globalAlpha = layer.opacity * style.alpha;
+          context.drawImage(image, sprite.x, sprite.y, sprite.w, sprite.h, dx, dy, screenTile, screenTile);
+          // Identity-color wash for "Layer focus" (desaturation is skipped for
+          // sprites in the Canvas2D fallback).
+          if (style.tintAmount > 0) {
+            context.globalAlpha = layer.opacity * style.alpha * style.tintAmount;
+            context.fillStyle = `rgb(${style.tint.r}, ${style.tint.g}, ${style.tint.b})`;
+            context.fillRect(dx, dy, screenTile, screenTile);
+          }
+          context.globalAlpha = 1;
+          continue;
+        }
+
+        // Flat-color tile (no sprite, or its image is still decoding).
+        const paint = tileAppearance({
+          cellColor: cell.color,
+          layerColor: layer.color,
+          layerOpacity: layer.opacity,
+          isActiveLayer,
+          layerFocus: frame.layerFocus,
+        });
+        context.fillStyle = `rgba(${Math.round(paint.r)}, ${Math.round(paint.g)}, ${Math.round(paint.b)}, ${paint.a})`;
+        context.fillRect(dx, dy, screenTile, screenTile);
       }
     }
   }

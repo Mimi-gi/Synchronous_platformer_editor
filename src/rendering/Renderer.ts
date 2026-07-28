@@ -16,6 +16,7 @@ export type RenderFrame = {
   activeLayerId: string;
   hoverCell: GridCell | null;
   selectedTool: ToolMode;
+  layerFocus: boolean;
 };
 
 export interface EditorRenderer {

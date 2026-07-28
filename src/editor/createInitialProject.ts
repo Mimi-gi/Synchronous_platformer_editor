@@ -20,6 +20,8 @@ export function createInitialProject(): EditorProject {
     id: "project-local-prototype",
     name: "Synchronous Platformer Editor",
     tileSize: 32,
+    textures: [],
+    sprites: [],
     tiles: [
       { id: 1, name: "Grass", color: "#6fbf73" },
       { id: 2, name: "Soil", color: "#3f7f5f" },
@@ -41,6 +43,7 @@ export function createInitialProject(): EditorProject {
             kind: "tile",
             visible: true,
             opacity: 1,
+            color: "#4cc2ff",
             cells: terrainCells,
           },
           {
@@ -49,6 +52,7 @@ export function createInitialProject(): EditorProject {
             kind: "tile",
             visible: true,
             opacity: 0.8,
+            color: "#ff7ab6",
             cells: {
               "3,13": { tileId: 100, color: "#f06c7a" },
               "25,13": { tileId: 101, color: "#f2d05e" },

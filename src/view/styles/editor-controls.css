@@ -119,6 +119,12 @@
   color: var(--color-accent-contrast);
 }
 
+.select-mode {
+  display: flex;
+  gap: var(--space-xs);
+  align-items: center;
+}
+
 .layer-color-row {
   display: flex;
   align-items: center;

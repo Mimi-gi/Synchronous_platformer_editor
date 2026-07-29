@@ -21,6 +21,11 @@ export type EditorHistory = {
   project: EditorProject;
   /** Reads the latest project synchronously (safe inside event handlers). */
   getSnapshot: () => EditorProject;
+  /**
+   * Replaces the shown project WITHOUT touching history. For transient live
+   * previews (e.g. dragging a selection); finalize with `transact` afterwards.
+   */
+  setProjectSilent: (project: EditorProject) => void;
   /** Applies an operation and records a single-operation undo entry. */
   dispatch: (op: Operation, origin?: Origin) => void;
   /** Applies several operations as one undo entry. */
@@ -57,6 +62,11 @@ export function useEditorHistory(initial: () => EditorProject): EditorHistory {
   const txRef = useRef<{ ops: Operation[]; inverse: Operation[]; origin: Origin } | null>(null);
 
   const getSnapshot = useCallback(() => projectRef.current, []);
+
+  const setProjectSilent = useCallback((next: EditorProject) => {
+    projectRef.current = next;
+    setProject(next);
+  }, []);
 
   const pushTransaction = useCallback((tx: Transaction) => {
     setPast((stack) => cap([...stack, tx]));
@@ -170,6 +180,7 @@ export function useEditorHistory(initial: () => EditorProject): EditorHistory {
   return {
     project,
     getSnapshot,
+    setProjectSilent,
     dispatch,
     transact,
     begin,

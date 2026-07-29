@@ -73,7 +73,13 @@ Current editor features:
 - Wheel zoom.
 - Paint tool.
 - Erase tool.
-- Select tool placeholder.
+- Rectangle fill tool (drag to fill a rectangle with the selected tile, as one
+  undo transaction).
+- Selection (Select tool) with two modes — rectangle marquee and lasso
+  (freeform closed path, boundary + interior). On a selection: drag inside it to
+  move the cells (active layer only), Delete/Backspace clears them, Ctrl/Cmd+C
+  copies and Ctrl/Cmd+V pastes at the hovered cell, Escape deselects. Move,
+  delete and paste are each one undo transaction.
 - Active layer selection.
 - Layer visibility toggle (per layer).
 - Active layer opacity slider.
@@ -100,10 +106,13 @@ Current editor features:
 
 ### Keyboard Shortcuts
 
-- `V` select, `P` (or `B`) paint, `E` erase, `H` pan.
+- `V` select, `P` (or `B`) paint, `E` erase, `R` rectangle fill, `H` pan.
+- `Delete`/`Backspace` clears the current selection's cells, `Escape` deselects.
+- `Ctrl/Cmd+C` copy selection, `Ctrl/Cmd+V` paste at the hovered cell.
 - `Ctrl/Cmd+Z` undo, `Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` redo.
 - `Ctrl/Cmd+S` export, `Ctrl/Cmd+0` reset zoom to 100%.
-- Shortcuts are ignored while an input/textarea is focused.
+- Shortcuts are ignored while an input/textarea is focused or the Sprite Editor
+  is open.
 
 ### Undo/Redo Notes
 
@@ -308,8 +317,8 @@ Pointer behavior:
 
 Known interaction limitations:
 
-- Select tool is currently a placeholder and does nothing.
-- No rectangular selection.
+- Selection is single-layer (move/copy/paste act on the active layer only).
+- Paste anchors at the hovered cell; no floating paste-drag placement yet.
 - No tile brush shapes.
 - No eyedropper.
 - Undo/redo is snapshot-based, not operation-based yet (see Collaboration
@@ -413,6 +422,7 @@ src/editor/types.ts
 src/editor/createInitialProject.ts
 src/editor/operations.ts
 src/editor/tileset.ts
+src/editor/selection.ts
 
 src/ui/useEditorHistory.ts
 src/ui/SpriteEditor.tsx
@@ -505,13 +515,17 @@ Done:
   Follow-ups: move/resize handles for existing sprite rects, snap-to-grid while
   drawing, multi-cell brushes, per-tile collision metadata.)
 
+- ~~Add selection and rectangular fill tools.~~ (`rect` fill tool + Select tool
+  with rectangle/lasso modes, move-by-drag, delete, and copy/paste — see
+  `src/editor/selection.ts`. Follow-ups: cross-layer selection, floating paste
+  placement, tile brush shapes, eyedropper.)
+
 Good next tasks:
 
 1. Add project format versioning and stricter validation.
 2. Split `EditorCanvas.tsx` into smaller UI components.
-3. Add selection and rectangular fill tools.
-4. Add proper entity model separate from tile layers.
-5. Wire operations to Yjs/CRDT + presence for realtime collaboration.
+3. Add proper entity model separate from tile layers.
+4. Wire operations to Yjs/CRDT + presence for realtime collaboration.
 
 ### Known rendering caveat (tilesets)
 

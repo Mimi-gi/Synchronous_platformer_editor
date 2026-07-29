@@ -2,15 +2,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ChangeEvent } from "react";
 import { createInitialProject } from "../editor/createInitialProject";
 import type {
+  CellRect,
   EditorProject,
   GridCell,
   Sprite,
   TextureAsset,
+  TileCell,
   ToolMode,
   Viewport,
 } from "../editor/types";
 import type { Operation } from "../editor/operations";
 import { loadImageSize, makeId, readFileAsDataUrl } from "../editor/tileset";
+import {
+  cellKey,
+  lassoToCells,
+  moveCellsPreview,
+  parseCellKey,
+  rectToCells,
+  shiftCells,
+} from "../editor/selection";
 import type { EditorRenderer, RendererKind, RendererSize } from "../rendering/Renderer";
 import { createRenderer } from "../rendering/createRenderer";
 import { isEditorProject } from "../project/validateProject";
@@ -37,6 +47,7 @@ const TOOL_LABELS: Record<ToolMode, string> = {
   select: "Select",
   paint: "Paint",
   erase: "Erase",
+  rect: "Rect",
   pan: "Pan",
 };
 
@@ -44,14 +55,27 @@ const TOOL_SHORTCUTS: Record<ToolMode, string> = {
   select: "V",
   paint: "P",
   erase: "E",
+  rect: "R",
   pan: "H",
 };
 
 const LAYER_COLOR_PALETTE = ["#4cc2ff", "#ff7ab6", "#ffd166", "#8ce99a", "#b197fc", "#ffa94d"];
 
 export function EditorCanvas() {
-  const { project, getSnapshot, dispatch, transact, begin, mutate, commit, undo, redo, canUndo, canRedo } =
-    useEditorHistory(createInitialProject);
+  const {
+    project,
+    getSnapshot,
+    setProjectSilent,
+    dispatch,
+    transact,
+    begin,
+    mutate,
+    commit,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+  } = useEditorHistory(createInitialProject);
 
   const [activeLayerId, setActiveLayerId] = useState("terrain");
   const [selectedTileId, setSelectedTileId] = useState(1);
@@ -60,6 +84,9 @@ export function EditorCanvas() {
   const [editingTextureId, setEditingTextureId] = useState<string | null>(null);
   const [viewport, setViewport] = useState<Viewport>({ centerX: 480, centerY: 320, zoom: 1 });
   const [hoverCell, setHoverCell] = useState<GridCell | null>(null);
+  const [previewRect, setPreviewRect] = useState<CellRect | null>(null);
+  const [selection, setSelection] = useState<Set<string> | null>(null);
+  const [selectMode, setSelectMode] = useState<"rect" | "lasso">("rect");
   const [rendererKind, setRendererKind] = useState<RendererKind | "initializing">("initializing");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textureInputRef = useRef<HTMLInputElement | null>(null);
@@ -70,6 +97,22 @@ export function EditorCanvas() {
   // True while a paint/erase stroke transaction is open, so pointer-move keeps
   // applying to the same undo entry.
   const strokingRef = useRef(false);
+  // Start cell of an in-progress rect-tool / rectangle-select drag.
+  const rectDragStartRef = useRef<GridCell | null>(null);
+  // Accumulated path (cell coords) of an in-progress lasso selection.
+  const lassoPathRef = useRef<GridCell[] | null>(null);
+  // In-progress move of a selection (drag inside the selection).
+  const moveRef = useRef<{
+    startCell: GridCell;
+    base: EditorProject;
+    layerId: string;
+    content: Map<string, TileCell>;
+    originalSelection: Set<string>;
+  } | null>(null);
+  // Copy/paste buffer: cell contents relative to the selection's top-left.
+  const clipboardRef = useRef<{ dx: number; dy: number; cell: TileCell }[] | null>(null);
+  const hoverCellRef = useRef<GridCell | null>(null);
+  hoverCellRef.current = hoverCell;
 
   const activeLevel = project.levels[0];
   const activeLayer = activeLevel.layers.find((layer) => layer.id === activeLayerId) ?? activeLevel.layers[0];
@@ -156,13 +199,25 @@ export function EditorCanvas() {
         hoverCell,
         selectedTool,
         layerFocus,
+        previewRect,
+        selection,
       });
       frameId = window.requestAnimationFrame(tick);
     };
 
     frameId = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frameId);
-  }, [activeLayer.id, activeLevel.id, hoverCell, layerFocus, project, selectedTool, viewport]);
+  }, [
+    activeLayer.id,
+    activeLevel.id,
+    hoverCell,
+    layerFocus,
+    previewRect,
+    project,
+    selectedTool,
+    selection,
+    viewport,
+  ]);
 
   // --- Coordinate helpers ------------------------------------------------
 
@@ -198,6 +253,33 @@ export function EditorCanvas() {
     [activeLevel.height, activeLevel.width, project.tileSize],
   );
 
+  const clampCells = useCallback(
+    (cells: Set<string>): Set<string> => {
+      const result = new Set<string>();
+      for (const key of cells) {
+        const { x, y } = parseCellKey(key);
+        if (x >= 0 && y >= 0 && x < activeLevel.width && y < activeLevel.height) result.add(key);
+      }
+      return result;
+    },
+    [activeLevel.height, activeLevel.width],
+  );
+
+  // Like worldToCell but clamps to the level bounds so rect drags keep tracking
+  // even when the pointer leaves the map.
+  const worldToCellClamped = useCallback(
+    (worldX: number, worldY: number): GridCell => {
+      const tileSize = project.tileSize;
+      const x = Math.floor(worldX / tileSize);
+      const y = Math.floor(worldY / tileSize);
+      return {
+        x: Math.max(0, Math.min(activeLevel.width - 1, x)),
+        y: Math.max(0, Math.min(activeLevel.height - 1, y)),
+      };
+    },
+    [activeLevel.height, activeLevel.width, project.tileSize],
+  );
+
   // --- Editing operations ------------------------------------------------
 
   const applyToolAt = useCallback(
@@ -219,6 +301,77 @@ export function EditorCanvas() {
     },
     [activeLayer.id, mutate, selectedTile.color, selectedTile.id, selectedTool],
   );
+
+  const fillRect = useCallback(
+    (rect: CellRect) => {
+      const ops: Operation[] = [];
+      for (let y = rect.minY; y <= rect.maxY; y += 1) {
+        for (let x = rect.minX; x <= rect.maxX; x += 1) {
+          ops.push({
+            type: "setCell",
+            layerId: activeLayer.id,
+            key: `${x},${y}`,
+            cell: { tileId: selectedTile.id, color: selectedTile.color },
+          });
+        }
+      }
+      transact(ops);
+    },
+    [activeLayer.id, selectedTile.color, selectedTile.id, transact],
+  );
+
+  const deleteSelection = useCallback(() => {
+    if (!selection || selection.size === 0) return;
+    const ops: Operation[] = [];
+    for (const key of selection) {
+      ops.push({ type: "setCell", layerId: activeLayer.id, key, cell: null });
+    }
+    transact(ops);
+  }, [activeLayer.id, selection, transact]);
+
+  const copySelection = useCallback(() => {
+    if (!selection || selection.size === 0) return;
+    const layer = getSnapshot().levels[0].layers.find((item) => item.id === activeLayer.id);
+    if (!layer) return;
+
+    let minX = Infinity;
+    let minY = Infinity;
+    for (const key of selection) {
+      const { x, y } = parseCellKey(key);
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+    }
+
+    const cells: { dx: number; dy: number; cell: TileCell }[] = [];
+    for (const key of selection) {
+      const cell = layer.cells[key];
+      if (!cell) continue;
+      const { x, y } = parseCellKey(key);
+      cells.push({ dx: x - minX, dy: y - minY, cell });
+    }
+    clipboardRef.current = cells.length > 0 ? cells : null;
+  }, [activeLayer.id, getSnapshot, selection]);
+
+  const pasteClipboard = useCallback(() => {
+    const clipboard = clipboardRef.current;
+    if (!clipboard) return;
+    const anchor = hoverCellRef.current ?? { x: 0, y: 0 };
+    const ops: Operation[] = [];
+    const pasted = new Set<string>();
+
+    for (const { dx, dy, cell } of clipboard) {
+      const x = anchor.x + dx;
+      const y = anchor.y + dy;
+      if (x < 0 || y < 0 || x >= activeLevel.width || y >= activeLevel.height) continue;
+      ops.push({ type: "setCell", layerId: activeLayer.id, key: cellKey(x, y), cell });
+      pasted.add(cellKey(x, y));
+    }
+
+    if (ops.length > 0) {
+      transact(ops);
+      setSelection(pasted);
+    }
+  }, [activeLayer.id, activeLevel.height, activeLevel.width, transact]);
 
   const toggleLayerVisibility = useCallback(
     (layerId: string) => {
@@ -425,7 +578,22 @@ export function EditorCanvas() {
         } else if (key === "0") {
           event.preventDefault();
           resetZoom();
+        } else if (key === "c") {
+          copySelection();
+        } else if (key === "v") {
+          event.preventDefault();
+          pasteClipboard();
         }
+        return;
+      }
+
+      if (key === "delete" || key === "backspace") {
+        event.preventDefault();
+        deleteSelection();
+        return;
+      }
+      if (key === "escape") {
+        setSelection(null);
         return;
       }
 
@@ -440,6 +608,9 @@ export function EditorCanvas() {
         case "e":
           setSelectedTool("erase");
           break;
+        case "r":
+          setSelectedTool("rect");
+          break;
         case "h":
           setSelectedTool("pan");
           break;
@@ -450,7 +621,16 @@ export function EditorCanvas() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [downloadProject, editingTextureId, redo, resetZoom, undo]);
+  }, [
+    copySelection,
+    deleteSelection,
+    downloadProject,
+    editingTextureId,
+    pasteClipboard,
+    redo,
+    resetZoom,
+    undo,
+  ]);
 
   // --- Pointer interaction -----------------------------------------------
 
@@ -469,6 +649,49 @@ export function EditorCanvas() {
       begin();
       strokingRef.current = true;
       applyToolAt(cell);
+      return;
+    }
+
+    if (selectedTool === "rect") {
+      const start = worldToCellClamped(world.x, world.y);
+      rectDragStartRef.current = start;
+      setPreviewRect({ minX: start.x, minY: start.y, maxX: start.x, maxY: start.y });
+      return;
+    }
+
+    if (selectedTool === "select") {
+      const start = worldToCellClamped(world.x, world.y);
+      const startKey = cellKey(start.x, start.y);
+
+      if (selection && selection.has(startKey)) {
+        // Drag inside the selection -> move it (active layer only).
+        const base = getSnapshot();
+        const layer = base.levels[0].layers.find((item) => item.id === activeLayer.id);
+        const content = new Map<string, TileCell>();
+        if (layer) {
+          for (const key of selection) {
+            const cell = layer.cells[key];
+            if (cell) content.set(key, cell);
+          }
+        }
+        moveRef.current = {
+          startCell: start,
+          base,
+          layerId: activeLayer.id,
+          content,
+          originalSelection: new Set(selection),
+        };
+        return;
+      }
+
+      // Otherwise start a fresh selection.
+      setSelection(null);
+      if (selectMode === "rect") {
+        rectDragStartRef.current = start;
+        setPreviewRect({ minX: start.x, minY: start.y, maxX: start.x, maxY: start.y });
+      } else {
+        lassoPathRef.current = [start];
+      }
     }
   };
 
@@ -487,6 +710,49 @@ export function EditorCanvas() {
     const cell = worldToCell(world.x, world.y);
     setHoverCell(cell);
 
+    // Moving a selection: live-preview the shifted cells (no history yet).
+    if (moveRef.current) {
+      const move = moveRef.current;
+      const current = worldToCellClamped(world.x, world.y);
+      const dx = current.x - move.startCell.x;
+      const dy = current.y - move.startCell.y;
+      const preview = moveCellsPreview(
+        move.base,
+        move.layerId,
+        move.content,
+        dx,
+        dy,
+        activeLevel.width,
+        activeLevel.height,
+      );
+      setProjectSilent(preview);
+      setSelection(clampCells(shiftCells(move.originalSelection, dx, dy)));
+      return;
+    }
+
+    if (rectDragStartRef.current) {
+      const start = rectDragStartRef.current;
+      const end = worldToCellClamped(world.x, world.y);
+      setPreviewRect({
+        minX: Math.min(start.x, end.x),
+        minY: Math.min(start.y, end.y),
+        maxX: Math.max(start.x, end.x),
+        maxY: Math.max(start.y, end.y),
+      });
+      return;
+    }
+
+    if (lassoPathRef.current) {
+      const path = lassoPathRef.current;
+      const current = worldToCellClamped(world.x, world.y);
+      const last = path[path.length - 1];
+      if (!last || last.x !== current.x || last.y !== current.y) {
+        path.push(current);
+      }
+      setSelection(lassoToCells(path, activeLevel.width, activeLevel.height));
+      return;
+    }
+
     if (event.buttons === 1 && strokingRef.current) {
       applyToolAt(cell);
     }
@@ -495,9 +761,68 @@ export function EditorCanvas() {
   const handlePointerUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
     event.currentTarget.releasePointerCapture(event.pointerId);
     dragRef.current = null;
+
     if (strokingRef.current) {
       commit();
       strokingRef.current = false;
+      return;
+    }
+
+    // Finalize a selection move: commit the shift as one transaction.
+    if (moveRef.current) {
+      const move = moveRef.current;
+      moveRef.current = null;
+      const world = screenToWorld(event.clientX, event.clientY);
+      const current = worldToCellClamped(world.x, world.y);
+      const dx = current.x - move.startCell.x;
+      const dy = current.y - move.startCell.y;
+
+      // Reset to the pre-move project so the transaction's inverses are correct.
+      setProjectSilent(move.base);
+
+      if (dx !== 0 || dy !== 0) {
+        const ops: Operation[] = [];
+        for (const key of move.content.keys()) {
+          ops.push({ type: "setCell", layerId: move.layerId, key, cell: null });
+        }
+        for (const [key, cell] of move.content) {
+          const { x, y } = parseCellKey(key);
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < activeLevel.width && ny < activeLevel.height) {
+            ops.push({ type: "setCell", layerId: move.layerId, key: cellKey(nx, ny), cell });
+          }
+        }
+        transact(ops);
+        setSelection(clampCells(shiftCells(move.originalSelection, dx, dy)));
+      }
+      return;
+    }
+
+    if (rectDragStartRef.current) {
+      const start = rectDragStartRef.current;
+      rectDragStartRef.current = null;
+      const world = screenToWorld(event.clientX, event.clientY);
+      const end = worldToCellClamped(world.x, world.y);
+      const rect: CellRect = {
+        minX: Math.min(start.x, end.x),
+        minY: Math.min(start.y, end.y),
+        maxX: Math.max(start.x, end.x),
+        maxY: Math.max(start.y, end.y),
+      };
+      setPreviewRect(null);
+      if (selectedTool === "rect") {
+        fillRect(rect);
+      } else {
+        setSelection(rectToCells(rect));
+      }
+      return;
+    }
+
+    if (lassoPathRef.current) {
+      const path = lassoPathRef.current;
+      lassoPathRef.current = null;
+      setSelection(lassoToCells(path, activeLevel.width, activeLevel.height));
     }
   };
 
@@ -708,6 +1033,26 @@ export function EditorCanvas() {
               {TOOL_LABELS[tool]}
             </button>
           ))}
+          {selectedTool === "select" ? (
+            <div className="select-mode" role="group" aria-label="Selection mode">
+              <button
+                className={selectMode === "rect" ? "chip-toggle active" : "chip-toggle"}
+                onClick={() => setSelectMode("rect")}
+                type="button"
+                title="Rectangle selection"
+              >
+                Rect
+              </button>
+              <button
+                className={selectMode === "lasso" ? "chip-toggle active" : "chip-toggle"}
+                onClick={() => setSelectMode("lasso")}
+                type="button"
+                title="Lasso (freeform) selection"
+              >
+                Lasso
+              </button>
+            </div>
+          ) : null}
           <span className="toolbar-spacer" />
           <button
             className="tool-button"
@@ -761,6 +1106,7 @@ export function EditorCanvas() {
           <span>
             Cell: {hoverCell ? `${hoverCell.x}, ${hoverCell.y}` : "-"}
           </span>
+          {selection && selection.size > 0 ? <span>Sel: {selection.size} cells</span> : null}
         </div>
       </section>
 

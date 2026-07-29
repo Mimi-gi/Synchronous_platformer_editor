@@ -349,6 +349,44 @@ export class WebGpuRenderer implements EditorRenderer {
       hoverFloats.push(x + tileSize - w, y, w, tileSize, ...color);
     }
 
+    const bw = Math.max(2 / frame.viewport.zoom, 1);
+
+    // Committed / preview selection: fill each cell and outline only edges whose
+    // neighbor is not selected.
+    const selection = frame.selection;
+    if (selection && selection.size > 0) {
+      const fill: [number, number, number, number] = [0.48, 0.7, 1, 0.18];
+      const border: [number, number, number, number] = [0.62, 0.76, 1, 1];
+      for (const key of selection) {
+        const [cx, cy] = key.split(",").map(Number);
+        const x = cx * tileSize;
+        const y = cy * tileSize;
+        hoverFloats.push(x, y, tileSize, tileSize, ...fill);
+        if (!selection.has(`${cx},${cy - 1}`)) hoverFloats.push(x, y, tileSize, bw, ...border);
+        if (!selection.has(`${cx},${cy + 1}`)) hoverFloats.push(x, y + tileSize - bw, tileSize, bw, ...border);
+        if (!selection.has(`${cx - 1},${cy}`)) hoverFloats.push(x, y, bw, tileSize, ...border);
+        if (!selection.has(`${cx + 1},${cy}`)) hoverFloats.push(x + tileSize - bw, y, bw, tileSize, ...border);
+      }
+    }
+
+    if (frame.previewRect) {
+      const rect = frame.previewRect;
+      const x = rect.minX * tileSize;
+      const y = rect.minY * tileSize;
+      const w = (rect.maxX - rect.minX + 1) * tileSize;
+      const h = (rect.maxY - rect.minY + 1) * tileSize;
+      const isSelect = frame.selectedTool === "select";
+      const fill: [number, number, number, number] = isSelect
+        ? [0.48, 0.7, 1, 0.16]
+        : [0.49, 0.87, 0.54, 0.18];
+      const border: [number, number, number, number] = isSelect ? [0.62, 0.76, 1, 1] : [0.49, 0.87, 0.54, 1];
+      hoverFloats.push(x, y, w, h, ...fill);
+      hoverFloats.push(x, y, w, bw, ...border);
+      hoverFloats.push(x, y + h - bw, w, bw, ...border);
+      hoverFloats.push(x, y, bw, h, ...border);
+      hoverFloats.push(x + w - bw, y, bw, h, ...border);
+    }
+
     return { colorFloats, hoverFloats, groups: [...groups.values()] };
   }
 

@@ -1,4 +1,4 @@
-import type { EditorProject, GridCell, ToolMode, Viewport } from "../editor/types";
+import type { CellRect, EditorProject, GridCell, ToolMode, Viewport } from "../editor/types";
 
 export type RendererKind = "webgpu" | "canvas2d";
 
@@ -17,6 +17,11 @@ export type RenderFrame = {
   hoverCell: GridCell | null;
   selectedTool: ToolMode;
   layerFocus: boolean;
+  /** In-progress drag rectangle for the rect tool / rectangle-select drag. */
+  previewRect: CellRect | null;
+  /** Selected cells ("x,y" keys) — committed selection, lasso preview, or a
+   *  selection being dragged (already shifted to its live position). */
+  selection: ReadonlySet<string> | null;
 };
 
 export interface EditorRenderer {

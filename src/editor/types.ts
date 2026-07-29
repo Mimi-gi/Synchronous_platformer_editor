@@ -1,4 +1,4 @@
-export type ToolMode = "select" | "paint" | "erase" | "pan";
+export type ToolMode = "select" | "paint" | "erase" | "rect" | "pan";
 
 export type TileCell = {
   tileId: number;
@@ -76,4 +76,12 @@ export type Viewport = {
 export type GridCell = {
   x: number;
   y: number;
+};
+
+/** Inclusive rectangle of grid cells (used for selection and rectangle fill). */
+export type CellRect = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
 };

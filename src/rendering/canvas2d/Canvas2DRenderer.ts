@@ -48,6 +48,7 @@ export class Canvas2DRenderer implements EditorRenderer {
     this.drawGrid(context, frame);
     this.drawTiles(context, frame);
     this.drawHover(context, frame);
+    this.drawOverlays(context, frame);
   }
 
   destroy(): void {
@@ -164,6 +165,68 @@ export class Canvas2DRenderer implements EditorRenderer {
       tileSize * frame.viewport.zoom,
       tileSize * frame.viewport.zoom,
     );
+  }
+
+  private drawOverlays(context: CanvasRenderingContext2D, frame: RenderFrame): void {
+    const tileSize = frame.project.tileSize;
+    const screen = frame.viewport.zoom * tileSize;
+
+    if (frame.selection && frame.selection.size > 0) {
+      const selection = frame.selection;
+      // Translucent fill per selected cell.
+      context.fillStyle = "rgba(122, 178, 255, 0.18)";
+      for (const key of selection) {
+        const [x, y] = key.split(",").map(Number);
+        context.fillRect(
+          this.worldToScreenX(x * tileSize, frame),
+          this.worldToScreenY(y * tileSize, frame),
+          screen,
+          screen,
+        );
+      }
+      // Outline: only edges where the neighbor is not selected.
+      context.strokeStyle = "#9ec3ff";
+      context.lineWidth = Math.max(1.5, 1.5 * frame.size.dpr);
+      context.beginPath();
+      for (const key of selection) {
+        const [x, y] = key.split(",").map(Number);
+        const sx = this.worldToScreenX(x * tileSize, frame);
+        const sy = this.worldToScreenY(y * tileSize, frame);
+        if (!selection.has(`${x},${y - 1}`)) {
+          context.moveTo(sx, sy);
+          context.lineTo(sx + screen, sy);
+        }
+        if (!selection.has(`${x},${y + 1}`)) {
+          context.moveTo(sx, sy + screen);
+          context.lineTo(sx + screen, sy + screen);
+        }
+        if (!selection.has(`${x - 1},${y}`)) {
+          context.moveTo(sx, sy);
+          context.lineTo(sx, sy + screen);
+        }
+        if (!selection.has(`${x + 1},${y}`)) {
+          context.moveTo(sx + screen, sy);
+          context.lineTo(sx + screen, sy + screen);
+        }
+      }
+      context.stroke();
+    }
+
+    if (frame.previewRect) {
+      const rect = frame.previewRect;
+      const sx = this.worldToScreenX(rect.minX * tileSize, frame);
+      const sy = this.worldToScreenY(rect.minY * tileSize, frame);
+      const w = (rect.maxX - rect.minX + 1) * screen;
+      const h = (rect.maxY - rect.minY + 1) * screen;
+      const isSelect = frame.selectedTool === "select";
+      context.fillStyle = isSelect ? "rgba(122, 178, 255, 0.16)" : "rgba(125, 223, 138, 0.18)";
+      context.fillRect(sx, sy, w, h);
+      context.strokeStyle = isSelect ? "#9ec3ff" : "#7ddf8a";
+      context.lineWidth = Math.max(1.5, 1.5 * frame.size.dpr);
+      context.setLineDash(isSelect ? [6 * frame.size.dpr, 4 * frame.size.dpr] : []);
+      context.strokeRect(sx, sy, w, h);
+      context.setLineDash([]);
+    }
   }
 
   private worldToScreenX(worldX: number, frame: RenderFrame): number {
